@@ -23,6 +23,7 @@
 |-----------|--------|-------|
 | Patchright (CDP leak) | Implemented | Protocol-level, not JS patches |
 | navigator.webdriver | Implemented | `--disable-blink-features=AutomationControlled` |
+| Headless User-Agent fix | Implemented | Auto-removes "HeadlessChrome" in headless mode |
 | Human behavior (Bezier) | Implemented | Mouse, typing, scrolling |
 | TLS fingerprinting (JA3/JA4) | Implemented | via curl_cffi for HTTP requests |
 | Canvas noise | Implemented | Optional via `FingerprintConfig(canvas_noise=True)` |
@@ -421,8 +422,8 @@ class StealthClient:
 
 ## Best Practices
 
-1. **Use `headless=False`** for maximum stealth
-2. **Don't set `user_agent`** — let real Chrome handle it (fingerprint mismatch)
+1. **Headless mode is safe** — SDK automatically removes "HeadlessChrome" from User-Agent
+2. **Don't set `user_agent`** — let the SDK handle it (auto-fixed in headless mode)
 3. **Don't set `viewport`** — uses `no_viewport` for realistic behavior
 4. **Add human behavior** between actions (`human_wait`, `human_click`)
 5. **Use persistent profiles** with `user_data_dir` for cookie persistence

@@ -21,7 +21,7 @@ async def main():
     # Local mode - no API key needed
     # headless=False recommended for maximum stealth
 
-    async with Abrasio(headless=False) as browser:
+    async with Abrasio(headless=True) as browser:
         page = await browser.new_page()
 
         # Test against bot detection sites
@@ -30,19 +30,19 @@ async def main():
         # Test 1: Sannysoft
         await page.goto("https://bot.sannysoft.com/")
         await page.wait_for_timeout(3000)
-        await page.screenshot(path="test_sannysoft.png")
+        await page.screenshot(path="test_sannysoft.png", full_page=True)
         print("Sannysoft test saved to test_sannysoft.png")
 
         # Test 2: Fingerprint.com (BotD)
-        await page.goto("https://fingerprint.com/products/bot-detection/")
+        await page.goto("https://demo.fingerprint.com/playground")
         await page.wait_for_timeout(3000)
-        await page.screenshot(path="test_fingerprint.png")
+        await page.screenshot(path="test_fingerprint.png", full_page=True)
         print("Fingerprint.com test saved to test_fingerprint.png")
 
         # Test 3: CreepJS
         await page.goto("https://abrahamjuliot.github.io/creepjs/")
         await page.wait_for_timeout(5000)
-        await page.screenshot(path="test_creepjs.png")
+        await page.screenshot(path="test_creepjs.png", full_page=True)
         print("CreepJS test saved to test_creepjs.png")
 
         print("\nCheck the screenshots to verify anti-detection is working!")

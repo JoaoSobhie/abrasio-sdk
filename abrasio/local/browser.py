@@ -243,6 +243,41 @@ class StealthBrowser:
             #"--window-size=1920,1080",
         ]
 
+        # Fix User-Agent in headless mode: Chrome adds "HeadlessChrome" which is detectable
+        # We replace it with the normal Chrome UA to avoid detection
+        # NOTE: We use a recent stable Chrome UA. The exact version doesn't matter much
+        # as long as it's consistent with the installed Chrome (which Patchright uses).
+        # The key is removing "HeadlessChrome" from the string.
+        if self.config.headless:
+            import platform
+
+            # Detect OS and build appropriate User-Agent
+            system = platform.system()
+            if system == "Windows":
+                # Windows 10/11 User-Agent
+                user_agent = (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                )
+            elif system == "Darwin":
+                # macOS User-Agent
+                user_agent = (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                )
+            else:
+                # Linux User-Agent
+                user_agent = (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                )
+
+            args.append(f"--user-agent={user_agent}")
+            logger.debug(f"Headless mode: overriding User-Agent to hide HeadlessChrome ({system})")
+
         #WebGL: only add flags when DISABLING (enabled by default in Chrome)
         if not fp.webgl:
             args.extend(["--disable-webgl", "--disable-webgl2"])
