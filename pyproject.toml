@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "abrasio"
+version = "0.1.0"
+description = "Stealth web scraping SDK with optional cloud browser support"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "Abrasio Team", email = "team@abrasio.io" }
+]
+keywords = [
+    "scraping",
+    "web-scraping",
+    "stealth",
+    "patchright",
+    "browser-automation",
+    "anti-detection",
+    "fingerprint",
+    "undetected",
+    "tls-fingerprint",
+    "ja3",
+    "curl-cffi"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "patchright>=1.49.0",
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+fingerprint = [
+    "browserforge>=1.0.0",
+]
+tls = [
+    "curl_cffi>=0.6.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+all = [
+    "browserforge>=1.0.0",
+    "curl_cffi>=0.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/abrasio/abrasio-sdk"
+Documentation = "https://docs.abrasio.io"
+Repository = "https://github.com/abrasio/abrasio-sdk"
+
+[tool.hatch.build.targets.wheel]
+packages = ["abrasio"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]

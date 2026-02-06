@@ -1,0 +1,265 @@
+"""HTTP client for Abrasio API."""
+
+from typing import Optional, Dict, Any
+import logging
+import asyncio
+
+import httpx
+
+from .._config import AbrasioConfig
+from .._exceptions import (
+    AuthenticationError,
+    SessionError,
+    InsufficientFundsError,
+    RateLimitError,
+    TimeoutError,
+    AbrasioError,
+)
+
+logger = logging.getLogger("abrasio.cloud.api")
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 1.0  # seconds
+RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+
+
+class AbrasioAPIClient:
+    """
+    HTTP client for communicating with Abrasio API.
+
+    Handles:
+    - Session creation
+    - Session status polling
+    - Session termination
+    - Error handling with automatic retry
+    """
+
+    def __init__(self, config: AbrasioConfig):
+        self.config = config
+        self.base_url = config.api_url.rstrip("/")
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def __aenter__(self) -> "AbrasioAPIClient":
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()
+
+    async def start(self) -> None:
+        """Initialize HTTP client."""
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers={
+                "X-API-KEY": self.config.api_key,
+                "Content-Type": "application/json",
+                "User-Agent": f"abrasio-sdk-python/0.1.0",
+            },
+            timeout=httpx.Timeout(30.0),
+        )
+
+    async def close(self) -> None:
+        """Close HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    def _ensure_client(self) -> httpx.AsyncClient:
+        """Ensure client is initialized."""
+        if not self._client:
+            raise AbrasioError("API client not started. Call start() first.")
+        return self._client
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Make an HTTP request with automatic retry on transient errors.
+
+        Retries on 429 (rate limit), 502, 503, 504 with exponential backoff.
+        Respects Retry-After header when present.
+        """
+        client = self._ensure_client()
+        last_exception = None
+
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = await getattr(client, method)(path, **kwargs)
+
+                if response.status_code not in RETRYABLE_STATUS_CODES:
+                    return self._handle_response(response)
+
+                # Retryable status - calculate wait time
+                if attempt == MAX_RETRIES:
+                    return self._handle_response(response)
+
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    wait = min(float(retry_after), 30.0)
+                else:
+                    wait = RETRY_BACKOFF_BASE * (2 ** attempt)
+
+                logger.warning(
+                    f"Request to {path} returned {response.status_code}, "
+                    f"retrying in {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                await asyncio.sleep(wait)
+
+            except httpx.TimeoutException:
+                last_exception = TimeoutError(f"Request to {path} timed out")
+                if attempt == MAX_RETRIES:
+                    raise last_exception
+
+                wait = RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    f"Request to {path} timed out, "
+                    f"retrying in {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                await asyncio.sleep(wait)
+
+        raise last_exception or AbrasioError("Request failed after retries")
+
+    async def create_session(
+        self,
+        url: str = None,
+        region: Optional[str] = None,
+        profile_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new browser session.
+
+        Args:
+            url: Target URL for region inference
+            region: Target region (e.g., "BR", "US")
+            profile_id: Persistent profile ID to use
+
+        Returns:
+            Session data including session_id
+
+        Raises:
+            AuthenticationError: Invalid API key
+            InsufficientFundsError: Not enough balance
+            SessionError: Session creation failed
+        """
+        payload = {}
+        if url:
+            payload["url"] = url
+        else:
+            payload["url"] = "https://example.com"
+        if region:
+            payload["region"] = region
+        if profile_id:
+            payload["profile_id"] = profile_id
+
+        return await self._request_with_retry("post", "/v1/browser/session/", json=payload)
+
+    async def get_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        Get session status.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Session data including status and ws_endpoint
+
+        Raises:
+            SessionError: Session not found
+        """
+        return await self._request_with_retry("get", f"/v1/browser/session/{session_id}")
+
+    async def wait_for_ready(
+        self,
+        session_id: str,
+        timeout_seconds: int = 60,
+        poll_interval: float = 1.0,
+    ) -> Dict[str, Any]:
+        """
+        Wait for session to be ready.
+
+        Polls the session status until it's READY or fails.
+
+        Args:
+            session_id: Session ID
+            timeout_seconds: Maximum time to wait
+            poll_interval: Time between polls
+
+        Returns:
+            Session data with ws_endpoint
+
+        Raises:
+            TimeoutError: Session didn't become ready in time
+            SessionError: Session failed
+        """
+        elapsed = 0
+
+        while elapsed < timeout_seconds:
+            session = await self.get_session(session_id)
+            status = session.get("status")
+
+            if status == "READY":
+                logger.info(f"Session {session_id} is ready")
+                return session
+
+            if status in ("FAILED", "ERROR"):
+                error_msg = session.get("error_message", "Unknown error")
+                raise SessionError(f"Session failed: {error_msg}", session_id)
+
+            if status == "FINISHED":
+                raise SessionError("Session already finished", session_id)
+
+            logger.debug(f"Session {session_id} status: {status}, waiting...")
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        raise TimeoutError(
+            f"Session {session_id} did not become ready within {timeout_seconds}s",
+            timeout_seconds * 1000,
+        )
+
+    async def finish_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        Finish/close a session.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Final session data
+        """
+        return await self._request_with_retry("post", f"/v1/browser/session/{session_id}/finish")
+
+    def _handle_response(self, response: httpx.Response) -> Dict[str, Any]:
+        """Handle API response and raise appropriate exceptions."""
+        if response.status_code == 200:
+            return response.json()
+
+        if response.status_code == 401:
+            raise AuthenticationError()
+
+        if response.status_code == 402:
+            # Insufficient funds
+            data = response.json()
+            balance = data.get("balance")
+            raise InsufficientFundsError(balance)
+
+        if response.status_code == 429:
+            # Rate limit
+            retry_after = response.headers.get("Retry-After")
+            raise RateLimitError(int(retry_after) if retry_after else None)
+
+        if response.status_code == 404:
+            raise SessionError("Session not found")
+
+        # Generic error
+        try:
+            data = response.json()
+            detail = data.get("detail", "Unknown error")
+        except Exception:
+            detail = response.text
+
+        raise AbrasioError(f"API error ({response.status_code}): {detail}")
